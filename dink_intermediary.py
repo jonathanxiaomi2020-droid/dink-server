@@ -27,8 +27,12 @@ def index():
     # Una página de inicio simple para saber que el servidor está vivo
     return jsonify({"status": "Dink webhook endpoint is active"})
 
-@app.route('/api/webhooks/dink', methods=['POST'])
+@app.route('/api/webhooks/dink', methods=['POST', 'GET'])
 def dink_webhook_handler():
+    # Si entras desde el navegador (GET), mostramos un mensaje de éxito
+    if request.method == 'GET':
+        return jsonify({"status": "URL correcta. El endpoint está listo para recibir notificaciones (POST)."}), 200
+
     # --- 1. Verificación de Seguridad ---
     # El plugin Dink puede enviar una cabecera personalizada para autenticación.
     # Usaremos 'X-Dink-Secret' como ejemplo.
