@@ -33,12 +33,9 @@ def dink_webhook_handler():
     print("\n--- [NUEVA PETICIÓN RECIBIDA] ---")
     try:
         # --- 1. Verificación de Seguridad ---
-        print(f"Headers recibidos: {json.dumps(dict(request.headers), indent=2)}")
-        received_secret = request.headers.get('X-Dink-Secret')
-        if not received_secret or received_secret != DINK_SECRET:
-            print(f"ALERTA: Secreto inválido o ausente. Secreto recibido: '{received_secret}'. IP: {request.remote_addr}")
-            return jsonify({"error": "Forbidden"}), 403
-        print("INFO: Secreto de Dink verificado correctamente.")
+        # Se ha eliminado la verificación de 'X-Dink-Secret' ya que el plugin no la envía por defecto.
+        # La seguridad recae en la URL del webhook y la validación de IP.
+        print(f"INFO: Procesando petición. Headers recibidos: {json.dumps(dict(request.headers), indent=2)}")
 
         # --- 2. Obtener la IP del Cliente ---
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
