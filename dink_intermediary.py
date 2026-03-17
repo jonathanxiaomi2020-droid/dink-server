@@ -60,45 +60,15 @@ def dink_webhook_handler():
         
         # --- 4. Lógica de Validación y Reenvío ---
         dink_payload = request.get_json()
-        
-        # Búsqueda robusta del nombre del jugador
-        player_name = dink_payload.get('playerName') # Formato estándar de Dink
-        if not player_name:
-            player_name = dink_payload.get('player_name') # Intento alternativo
-        if not player_name:
-            player_name = dink_payload.get('extra', {}).get('player_name', 'Desconocido')
-            
+        player_name = dink_payload.get('extra', {}).get('player_name', 'Desconocido')
+        if player_name == 'Desconocido':
+             player_name = dink_payload.get('player_name', 'Desconocido')
         notification_type = dink_payload.get('type')
         print(f"INFO: Procesando notificación tipo '{notification_type}' para el jugador '{player_name}'.")
         print(f"INFO: Países permitidos: {ALLOWED_COUNTRIES}")
 
-        print(f"INFO: Dink Payload: {json.dumps(dink_payload, indent=2)}")
         if country_code and country_code in ALLOWED_COUNTRIES:
             print(f"DECISIÓN: La IP de {country_code} está permitida. Reenviando a Discord...")
-            
-            # --- NUEVO: Notificar al Staff sobre conexión exitosa (IP Permitida) ---
-            if STAFF_LOG_WEBHOOK_URL:
-                success_alert = {
-                    "content": f"✅ **Actividad Autorizada**",
-                    "embeds": [{
-                        "color": 5763719, # Verde (Green)
-                        "title": "Conexión Válida Detectada",
-                        "fields": [
-                            {"name": "Jugador (RSN)", "value": f"`{player_name}`", "inline": True},
-                            {"name": "País Detectado", "value": f"`{country_code}`", "inline": True},
-                            {"name": "IP", "value": f"`{ip_address}`", "inline": True},
-                            {"name": "Tipo", "value": f"`{notification_type or 'General'}`", "inline": True}
-                        ],
-                        "footer": {"text": "La notificación ha sido reenviada al canal correspondiente."}
-                    }]
-                }
-                try:
-                    # Enviamos esto rápido y sin bloquear el proceso principal
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5)
-                except Exception as e:
-                    print(f"WARN: No se pudo enviar el log de éxito al staff: {e}")
-            # -----------------------------------------------------------------------
-
             target_webhook = REAL_DISCORD_WEBHOOK_URL
 
             if notification_type == 'LOGIN' and LOGIN_LOGOUT_WEBHOOK_URL:
