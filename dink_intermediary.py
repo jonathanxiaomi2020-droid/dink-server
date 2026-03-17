@@ -161,7 +161,10 @@ def dink_webhook_handler():
             print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
             
             # Preparamos los argumentos para el envío (texto o texto + imágenes)
-            request_kwargs = {'timeout': 15}
+            # IMPORTANTE: Usamos un User-Agent personalizado para evitar bloqueos de Cloudflare (Error 429)
+            headers = {'User-Agent': 'DinkIntermediary/1.0 (Render; +https://dink-server.onrender.com)'}
+            request_kwargs = {'timeout': 20, 'headers': headers}
+            
             if files_to_forward:
                 request_kwargs['files'] = files_to_forward
                 request_kwargs['data'] = {'payload_json': json.dumps(dink_payload)}
@@ -179,8 +182,8 @@ def dink_webhook_handler():
                         # Añadimos 0.5s extra de seguridad
                         retry_after = float(post_response.json().get('retry_after', 1.0)) + 0.5
                     except:
-                        # Si falla (ej: es HTML de Cloudflare), esperamos 5s para enfriar
-                        retry_after = 5.0
+                        # Si falla (ej: es HTML de Cloudflare), esperamos 10s para enfriar
+                        retry_after = 10.0
                     
                     print(f"WARN: Discord Rate Limit (429). Esperando {retry_after:.2f}s... (Intento {attempt+1}/{max_retries})")
                     time.sleep(retry_after)
