@@ -60,8 +60,34 @@ def dink_webhook_handler():
         except requests.RequestException as e:
             print(f"ERROR: No se pudo contactar la API de geolocalización: {e}")
         
-        # --- 4. Lógica de Validación y Reenvío ---
-        dink_payload = request.get_json()
+        # --- 4. Lógica de Validación y Reenvío (Soporte para Imágenes) ---
+        dink_payload = None
+        files_to_forward = None
+
+        if request.is_json:
+            dink_payload = request.get_json()
+        elif request.content_type and 'multipart/form-data' in request.content_type:
+            # Si vienen imágenes, los datos JSON están dentro del campo 'payload_json'
+            payload_str = request.form.get('payload_json')
+            if payload_str:
+                try:
+                    dink_payload = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    print("ERROR: JSON malformado en payload_json")
+            
+            if request.files:
+                files_to_forward = {}
+                for key, f in request.files.items():
+                    # Leemos el archivo en memoria para reenviarlo
+                    files_to_forward[key] = (f.filename, f.read(), f.content_type)
+        
+        if not dink_payload:
+            # Intento final de forzar lectura si todo lo demás falla
+            dink_payload = request.get_json(force=True, silent=True)
+
+        if not dink_payload:
+            print(f"ERROR FATAL: No se pudo leer el payload. Content-Type: {request.content_type}")
+            return jsonify({"error": "Bad Request"}), 400
         
         # Búsqueda robusta del nombre del jugador
         player_name = dink_payload.get('playerName') # Formato estándar de Dink
@@ -128,10 +154,18 @@ def dink_webhook_handler():
         try:
             print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
             
+            # Preparamos los argumentos para el envío (texto o texto + imágenes)
+            request_kwargs = {'timeout': 10}
+            if files_to_forward:
+                request_kwargs['files'] = files_to_forward
+                request_kwargs['data'] = {'payload_json': json.dumps(dink_payload)}
+            else:
+                request_kwargs['json'] = dink_payload
+            
             # Lógica de reintentos para manejar Rate Limits (Error 429)
             max_retries = 3
             for attempt in range(max_retries):
-                post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
+                post_response = requests.post(target_webhook, **request_kwargs)
                 
                 if post_response.status_code == 429:
                     # Discord nos pide esperar. Leemos el tiempo exacto del "retry_after".
