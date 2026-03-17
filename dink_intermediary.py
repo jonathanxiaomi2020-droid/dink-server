@@ -163,7 +163,10 @@ def dink_webhook_handler():
                     post_response = requests.post(target_webhook, **request_kwargs)
                     
                     if post_response.status_code == 429:
-                        retry_after = float(post_response.json().get('retry_after', 5.0))
+                        try:
+                            retry_after = float(post_response.json().get('retry_after', 5.0))
+                        except json.JSONDecodeError:
+                            retry_after = 7.0 # Si la respuesta no es JSON (ej. HTML de Cloudflare), esperamos un tiempo fijo más largo
                         print(f"WARN: Discord Rate Limit (429). Esperando {retry_after}s... (Intento {attempt+1})")
                         time.sleep(retry_after + 1.0)
                         continue
