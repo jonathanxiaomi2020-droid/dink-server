@@ -161,9 +161,7 @@ def dink_webhook_handler():
             print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
             
             # Preparamos los argumentos para el envío (texto o texto + imágenes)
-            # IMPORTANTE: Usamos un User-Agent personalizado para evitar bloqueos de Cloudflare (Error 429)
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-            request_kwargs = {'timeout': 20, 'headers': headers}
+            request_kwargs = {}
             
             if files_to_forward:
                 request_kwargs['files'] = files_to_forward
@@ -171,36 +169,9 @@ def dink_webhook_handler():
             else:
                 request_kwargs['json'] = dink_payload
             
-            # Lógica de reintentos para manejar Rate Limits (Error 429)
-            max_retries = 5
-            for attempt in range(max_retries):
-                post_response = requests.post(target_webhook, **request_kwargs)
-                
-                if post_response.status_code == 429:
-                    # Discord nos pide esperar. Leemos el tiempo exacto del "retry_after".
-                    try:
-                        # Añadimos 0.5s extra de seguridad
-                        retry_after = float(post_response.json().get('retry_after', 1.0)) + 0.5
-                    except:
-                        # Si falla (ej: es HTML de Cloudflare), esperamos 10s para enfriar
-                        retry_after = 10.0
-                    
-                    print(f"WARN: Discord Rate Limit (429). Esperando {retry_after:.2f}s... (Intento {attempt+1}/{max_retries})")
-                    time.sleep(retry_after)
-                    
-                    # Si no es el último intento, continuamos al siguiente ciclo
-                    if attempt < max_retries - 1:
-                        continue 
-                
-                # Si llegamos aquí, o tuvimos éxito, o es un error diferente a 429, o es el último intento fallido
-                if post_response.status_code in [200, 204]:
-                    print(f"INFO: ✅ Discord respondió con éxito: {post_response.status_code}")
-                    break
-                else:
-                    # Truncamos el mensaje de error para evitar logs gigantes de HTML
-                    error_text = post_response.text[:500] + "..." if len(post_response.text) > 500 else post_response.text
-                    print(f"ERROR: Discord falló con estado: {post_response.status_code} - {error_text}")
-                    post_response.raise_for_status() # Esto lanzará excepción si no fue 200
+            # Envio simple y directo
+            post_response = requests.post(target_webhook, **request_kwargs)
+            print(f"INFO: Discord respondió con estado: {post_response.status_code}")
 
         except requests.RequestException as e:
             print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
