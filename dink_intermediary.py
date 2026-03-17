@@ -161,7 +161,7 @@ def dink_webhook_handler():
             print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
             
             # Preparamos los argumentos para el envío (texto o texto + imágenes)
-            request_kwargs = {'timeout': 10}
+            request_kwargs = {'timeout': 15}
             if files_to_forward:
                 request_kwargs['files'] = files_to_forward
                 request_kwargs['data'] = {'payload_json': json.dumps(dink_payload)}
@@ -169,23 +169,33 @@ def dink_webhook_handler():
                 request_kwargs['json'] = dink_payload
             
             # Lógica de reintentos para manejar Rate Limits (Error 429)
-            max_retries = 3
+            max_retries = 5
             for attempt in range(max_retries):
                 post_response = requests.post(target_webhook, **request_kwargs)
                 
                 if post_response.status_code == 429:
                     # Discord nos pide esperar. Leemos el tiempo exacto del "retry_after".
                     try:
-                        retry_after = float(post_response.json().get('retry_after', 2.0))
+                        # Añadimos 0.5s extra de seguridad
+                        retry_after = float(post_response.json().get('retry_after', 1.0)) + 0.5
                     except:
                         retry_after = 2.0
+                    
                     print(f"WARN: Discord Rate Limit (429). Esperando {retry_after:.2f}s... (Intento {attempt+1}/{max_retries})")
                     time.sleep(retry_after)
-                    continue # Reintentamos
+                    
+                    # Si no es el último intento, continuamos al siguiente ciclo
+                    if attempt < max_retries - 1:
+                        continue 
                 
-                print(f"INFO: Discord respondió con estado: {post_response.status_code}")
-                post_response.raise_for_status()
-                break # Si llegamos aquí, se envió con éxito o falló con otro error
+                # Si llegamos aquí, o tuvimos éxito, o es un error diferente a 429, o es el último intento fallido
+                if post_response.status_code in [200, 204]:
+                    print(f"INFO: ✅ Discord respondió con éxito: {post_response.status_code}")
+                    break
+                else:
+                    print(f"ERROR: Discord falló con estado: {post_response.status_code} - {post_response.text}")
+                    post_response.raise_for_status() # Esto lanzará excepción si no fue 200
+
         except requests.RequestException as e:
             print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
         
