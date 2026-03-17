@@ -74,66 +74,65 @@ def dink_webhook_handler():
         print(f"INFO: Países permitidos: {ALLOWED_COUNTRIES}")
 
         print(f"INFO: Dink Payload: {json.dumps(dink_payload, indent=2)}")
-        if country_code and country_code in ALLOWED_COUNTRIES:
-            print(f"DECISIÓN: La IP de {country_code} está permitida. Reenviando a Discord...")
+        
+        # --- 5. Sistema de Alertas al Staff (Sin Bloqueo) ---
+        if STAFF_LOG_WEBHOOK_URL:
+            is_safe_country = country_code and country_code in ALLOWED_COUNTRIES
             
-            # --- NUEVO: Notificar al Staff sobre conexión exitosa (IP Permitida) ---
-            if STAFF_LOG_WEBHOOK_URL:
-                success_alert = {
-                    "content": f"✅ **Actividad Autorizada**",
-                    "embeds": [{
-                        "color": 5763719, # Verde (Green)
-                        "title": "Conexión Válida Detectada",
-                        "fields": [
-                            {"name": "Jugador (RSN)", "value": f"`{player_name}`", "inline": True},
-                            {"name": "País Detectado", "value": f"`{country_code}`", "inline": True},
-                            {"name": "IP", "value": f"`{ip_address}`", "inline": True},
-                            {"name": "Tipo", "value": f"`{notification_type or 'General'}`", "inline": True}
-                        ],
-                        "footer": {"text": "La notificación ha sido reenviada al canal correspondiente."}
-                    }]
-                }
-                try:
-                    # Enviamos esto rápido y sin bloquear el proceso principal
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5)
-                except Exception as e:
-                    print(f"WARN: No se pudo enviar el log de éxito al staff: {e}")
-            # -----------------------------------------------------------------------
+            if is_safe_country:
+                # CASO 1: País Seguro (VPN Activa o ubicación permitida) -> Mensaje VERDE
+                print(f"DECISIÓN: La IP de {country_code} está en la lista segura.")
+                embed_color = 5763719 # Verde
+                alert_title = "Conexión Segura Detectada"
+                alert_content = "✅ **Actividad Autorizada**"
+                footer_text = "Conexión desde ubicación de confianza."
+            else:
+                # CASO 2: País Inusual (VPN Apagada o ubicación diferente) -> Mensaje AMARILLO
+                print(f"DECISIÓN: La IP de {country_code or 'Desconocida'} NO está en la lista segura. Se enviará alerta.")
+                embed_color = 16776960 # Amarillo/Naranja (Warning)
+                alert_title = "⚠️ Ubicación Inusual / VPN Desactivada"
+                alert_content = f"🚨 **Atención Staff: Conexión fuera de zona habitual**"
+                footer_text = "La notificación se ha permitido, pero verifica la ubicación."
 
-            target_webhook = REAL_DISCORD_WEBHOOK_URL
-
-            if notification_type == 'LOGIN' and LOGIN_LOGOUT_WEBHOOK_URL:
-                target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
-                print("INFO: Notificación de LOGIN, redirigiendo a webhook de Login/Logout.")
-            
-            if not target_webhook:
-                print(f"ERROR FATAL: No hay un webhook de destino configurado para esta notificación.")
-                return jsonify({"status": "ok, but no webhook configured"}), 200
-
+            staff_alert = {
+                "content": alert_content,
+                "embeds": [{
+                    "color": embed_color,
+                    "title": alert_title,
+                    "fields": [
+                        {"name": "Jugador (RSN)", "value": f"`{player_name}`", "inline": True},
+                        {"name": "País Detectado", "value": f"`{country_code or 'Desconocido'}`", "inline": True},
+                        {"name": "IP", "value": f"`{ip_address}`", "inline": True},
+                        {"name": "Tipo Notificación", "value": f"`{notification_type or 'General'}`", "inline": True}
+                    ],
+                    "footer": {"text": footer_text}
+                }]
+            }
             try:
-                print(f"INFO: Enviando payload a webhook de Discord...")
-                post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
-                print(f"INFO: Discord respondió con estado: {post_response.status_code}")
-                post_response.raise_for_status()
-            except requests.RequestException as e:
-                print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
-            
-            return jsonify({"status": "ok"}), 200
-        else:
-            print(f"DECISIÓN: IP no autorizada. Ubicación: {country_code}. Bloqueando y enviando alerta.")
-            if STAFF_LOG_WEBHOOK_URL:
-                alert_payload = {
-                    "content": f"🚨 **Alerta de IP No Autorizada** 🚨",
-                    "embeds": [{"color": 15158332, "title": "Intento de Conexión desde Ubicación No Permitida", "fields": [{"name": "Jugador (RSN)", "value": f"`{player_name}`", "inline": True}, {"name": "Ubicación Detectada", "value": f"`{country_code or 'Desconocida'}`", "inline": True}, {"name": "Dirección IP", "value": f"`{ip_address}`", "inline": True}], "footer": {"text": "La notificación de Dink ha sido bloqueada."}}]
-                }
-                try:
-                    print("INFO: Enviando alerta a webhook de staff...")
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=alert_payload, timeout=10)
-                    print("INFO: Alerta de staff enviada.")
-                except requests.RequestException as e:
-                    print(f"ERROR: No se pudo enviar la alerta de staff a Discord: {e}")
+                requests.post(STAFF_LOG_WEBHOOK_URL, json=staff_alert, timeout=5)
+            except Exception as e:
+                print(f"WARN: No se pudo enviar la alerta al staff: {e}")
 
-            return jsonify({"status": "ok"}), 200
+        # --- 6. Reenvío a Discord (Siempre ocurre, sin importar el país) ---
+        target_webhook = REAL_DISCORD_WEBHOOK_URL
+
+        if notification_type == 'LOGIN' and LOGIN_LOGOUT_WEBHOOK_URL:
+            target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
+            print("INFO: Notificación de LOGIN, redirigiendo a webhook de Login/Logout.")
+        
+        if not target_webhook:
+            print(f"ERROR FATAL: No hay un webhook de destino configurado para esta notificación.")
+            return jsonify({"status": "ok, but no webhook configured"}), 200
+
+        try:
+            print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
+            post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
+            print(f"INFO: Discord respondió con estado: {post_response.status_code}")
+            post_response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
+        
+        return jsonify({"status": "ok"}), 200
 
     except Exception as e:
         print(f"--- [ERROR INESPERADO EN EL HANDLER] ---")
