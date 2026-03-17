@@ -4,11 +4,17 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import json # Para imprimir logs más bonitos
 import time
+import sys
 
 # Cargar variables de entorno desde el archivo .env
 load_dotenv()
 
 app = Flask(__name__)
+
+# --- FORZAR LOGS INMEDIATOS ---
+# Esto evita que Python se guarde los mensajes en memoria.
+# Es crucial para ver logs en tiempo real en Render.
+sys.stdout.reconfigure(line_buffering=True)
 
 # --- CONFIGURACIÓN ---
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
