@@ -3,11 +3,16 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import json # Para imprimir logs más bonitos
+import sys
+import time
 
 # Cargar variables de entorno desde el archivo .env
 load_dotenv()
 
 app = Flask(__name__)
+
+# --- FORZAR LOGS INMEDIATOS (Soluciona que no aparezca nada en Render) ---
+sys.stdout.reconfigure(line_buffering=True)
 
 # --- CONFIGURACIÓN ---
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
@@ -58,9 +63,34 @@ def dink_webhook_handler():
         except requests.RequestException as e:
             print(f"ERROR: No se pudo contactar la API de geolocalización: {e}")
         
-        # --- 4. Lógica de Validación y Reenvío ---
-        dink_payload = request.get_json()
+        # --- 4. Lógica de Validación y Reenvío (Soporte Imágenes y Texto) ---
+        dink_payload = None
+        files_to_forward = None
+
+        # Intentamos leer JSON o Multipart (Imágenes)
+        if request.is_json:
+            dink_payload = request.get_json()
+        elif request.content_type and 'multipart/form-data' in request.content_type:
+            payload_str = request.form.get('payload_json')
+            if payload_str:
+                try:
+                    dink_payload = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    print("ERROR: JSON malformado en payload_json")
+            
+            if request.files:
+                files_to_forward = {}
+                for key, f in request.files.items():
+                    files_to_forward[key] = (f.filename, f.read(), f.content_type)
         
+        if not dink_payload:
+             # Intento final de lectura forzada
+             dink_payload = request.get_json(force=True, silent=True)
+
+        if not dink_payload:
+            print("ERROR: No se encontró payload JSON válido.")
+            return jsonify({"error": "No JSON payload"}), 400
+
         # Búsqueda robusta del nombre del jugador
         player_name = dink_payload.get('playerName') # Formato estándar de Dink
         if not player_name:
@@ -110,10 +140,38 @@ def dink_webhook_handler():
                 return jsonify({"status": "ok, but no webhook configured"}), 200
 
             try:
-                print(f"INFO: Enviando payload a webhook de Discord...")
-                post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
-                print(f"INFO: Discord respondió con estado: {post_response.status_code}")
-                post_response.raise_for_status()
+                print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
+                
+                # Headers para simular navegador (Evita bloqueo 429 Cloudflare)
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+
+                request_kwargs = {
+                    'headers': headers,
+                    'timeout': 20
+                }
+
+                if files_to_forward:
+                    request_kwargs['files'] = files_to_forward
+                    request_kwargs['data'] = {'payload_json': json.dumps(dink_payload)}
+                else:
+                    request_kwargs['json'] = dink_payload
+
+                # Bucle de reintentos para manejar Rate Limits
+                for attempt in range(5):
+                    post_response = requests.post(target_webhook, **request_kwargs)
+                    
+                    if post_response.status_code == 429:
+                        retry_after = float(post_response.json().get('retry_after', 5.0))
+                        print(f"WARN: Discord Rate Limit (429). Esperando {retry_after}s... (Intento {attempt+1})")
+                        time.sleep(retry_after + 1.0)
+                        continue
+                    
+                    print(f"INFO: Discord respondió con estado: {post_response.status_code}")
+                    post_response.raise_for_status()
+                    break
+
             except requests.RequestException as e:
                 print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
             
