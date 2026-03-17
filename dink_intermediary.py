@@ -3,6 +3,7 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import json # Para imprimir logs más bonitos
+import time
 
 # Cargar variables de entorno desde el archivo .env
 load_dotenv()
@@ -126,9 +127,25 @@ def dink_webhook_handler():
 
         try:
             print(f"INFO: Enviando payload a webhook de Discord (Destino final)...")
-            post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
-            print(f"INFO: Discord respondió con estado: {post_response.status_code}")
-            post_response.raise_for_status()
+            
+            # Lógica de reintentos para manejar Rate Limits (Error 429)
+            max_retries = 3
+            for attempt in range(max_retries):
+                post_response = requests.post(target_webhook, json=dink_payload, timeout=10)
+                
+                if post_response.status_code == 429:
+                    # Discord nos pide esperar. Leemos el tiempo exacto del "retry_after".
+                    try:
+                        retry_after = float(post_response.json().get('retry_after', 2.0))
+                    except:
+                        retry_after = 2.0
+                    print(f"WARN: Discord Rate Limit (429). Esperando {retry_after:.2f}s... (Intento {attempt+1}/{max_retries})")
+                    time.sleep(retry_after)
+                    continue # Reintentamos
+                
+                print(f"INFO: Discord respondió con estado: {post_response.status_code}")
+                post_response.raise_for_status()
+                break # Si llegamos aquí, se envió con éxito o falló con otro error
         except requests.RequestException as e:
             print(f"ERROR: No se pudo reenviar la notificación a Discord: {e}")
         
