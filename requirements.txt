@@ -4,3 +4,4 @@ python-dotenv
 Flask
 requests
 gunicorn
+dhooks==1.1.4
