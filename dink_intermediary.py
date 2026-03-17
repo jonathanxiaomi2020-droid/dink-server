@@ -179,7 +179,8 @@ def dink_webhook_handler():
                         # Añadimos 0.5s extra de seguridad
                         retry_after = float(post_response.json().get('retry_after', 1.0)) + 0.5
                     except:
-                        retry_after = 2.0
+                        # Si falla (ej: es HTML de Cloudflare), esperamos 5s para enfriar
+                        retry_after = 5.0
                     
                     print(f"WARN: Discord Rate Limit (429). Esperando {retry_after:.2f}s... (Intento {attempt+1}/{max_retries})")
                     time.sleep(retry_after)
@@ -193,7 +194,9 @@ def dink_webhook_handler():
                     print(f"INFO: ✅ Discord respondió con éxito: {post_response.status_code}")
                     break
                 else:
-                    print(f"ERROR: Discord falló con estado: {post_response.status_code} - {post_response.text}")
+                    # Truncamos el mensaje de error para evitar logs gigantes de HTML
+                    error_text = post_response.text[:500] + "..." if len(post_response.text) > 500 else post_response.text
+                    print(f"ERROR: Discord falló con estado: {post_response.status_code} - {error_text}")
                     post_response.raise_for_status() # Esto lanzará excepción si no fue 200
 
         except requests.RequestException as e:
