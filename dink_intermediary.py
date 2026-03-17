@@ -162,7 +162,7 @@ def dink_webhook_handler():
             
             # Preparamos los argumentos para el envío (texto o texto + imágenes)
             # IMPORTANTE: Usamos un User-Agent personalizado para evitar bloqueos de Cloudflare (Error 429)
-            headers = {'User-Agent': 'DinkIntermediary/1.0 (Render; +https://dink-server.onrender.com)'}
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
             request_kwargs = {'timeout': 20, 'headers': headers}
             
             if files_to_forward:
