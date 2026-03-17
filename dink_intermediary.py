@@ -15,8 +15,9 @@ STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
 LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 DINK_SECRET = os.getenv("DINK_SECRET")
 
-# Carga los países permitidos desde las variables de entorno, separados por comas.
-# Ejemplo en .env: ALLOWED_COUNTRIES=US,GB,VE
+# Carga los países considerados "Seguros" o "VPN Habitual".
+# Si la conexión viene de aquí, sale en VERDE. Si no, sale en AMARILLO (pero NO se bloquea).
+# Ejemplo en .env: ALLOWED_COUNTRIES=US,GB
 ALLOWED_COUNTRIES_STR = os.getenv("ALLOWED_COUNTRIES", "US,GB")
 ALLOWED_COUNTRIES = [country.strip().upper() for country in ALLOWED_COUNTRIES_STR.split(',')]
 
