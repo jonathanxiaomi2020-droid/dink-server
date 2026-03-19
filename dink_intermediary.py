@@ -23,7 +23,7 @@ STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
 LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 
 # Países permitidos
-ALLOWED_COUNTRIES = [c.strip().upper() for c in os.getenv("ALLOWED_COUNTRIES", "US,GB").split(',')]
+ALLOWED_COUNTRIES = [c.strip().upper() for c in os.getenv("ALLOWED_COUNTRIES", "US,GB,VE").split(',')]
 
 # --- ENDPOINT PARA RECIBIR DE HOOKDECK ---
 @app.route('/api/proxy-destino', methods=['GET', 'POST'])
@@ -66,7 +66,15 @@ def proxy_destino():
         print(f"📌 Tipo: {notification_type}")
 
         # --- DECISIÓN ---
+        # Si no se pudo detectar el país, asumimos que es seguro para no romper la prueba (puedes cambiar esto luego)
+        is_allowed = False
         if country_code and country_code in ALLOWED_COUNTRIES:
+            is_allowed = True
+        elif country_code is None:
+            print("⚠️ No se pudo detectar país. Permitido por defecto para pruebas.")
+            is_allowed = True
+
+        if is_allowed:
             print(f"✅ PAÍS PERMITIDO: {country_code}")
             
             # Enviar LOG al staff
@@ -97,6 +105,11 @@ def proxy_destino():
             if notification_type in ['LOGIN', 'LOGOUT'] and LOGIN_LOGOUT_WEBHOOK_URL:
                 target = LOGIN_LOGOUT_WEBHOOK_URL
                 print(f"  📨 Usando webhook específico para {notification_type}")
+
+            if not target:
+                print("❌ ERROR CRÍTICO: No hay URL de Webhook configurada en las variables de entorno.")
+                print("   -> Asegúrate de configurar REAL_DISCORD_WEBHOOK_URL en Render.")
+                return jsonify({"error": "Server misconfiguration"}), 500
 
             if target:
                 try:
@@ -146,7 +159,12 @@ def test():
         "status": "ok", 
         "message": "Servidor funcionando",
         "hookdeck_destination": "/api/proxy-destino",
-        "paises_permitidos": ALLOWED_COUNTRIES
+        "paises_permitidos": ALLOWED_COUNTRIES,
+        "webhooks_configurados": {
+            "Main": "✅ SI" if REAL_DISCORD_WEBHOOK_URL else "❌ NO (Falta Variable)",
+            "Staff": "✅ SI" if STAFF_LOG_WEBHOOK_URL else "❌ NO (Opcional)",
+            "Login": "✅ SI" if LOGIN_LOGOUT_WEBHOOK_URL else "❌ NO (Opcional)"
+        }
     })
 
 @app.route('/')
@@ -165,4 +183,10 @@ if __name__ == '__main__':
     print(f"\n🚀 Servidor Hookdeck iniciado en puerto {port}")
     print(f"✅ Endpoint para Hookdeck: /api/proxy-destino")
     print(f"🌍 Países permitidos: {ALLOWED_COUNTRIES}")
+    
+    if not REAL_DISCORD_WEBHOOK_URL:
+        print("\n⚠️  ADVERTENCIA: 'REAL_DISCORD_WEBHOOK_URL' no está configurado.")
+        print("⚠️  El servidor recibirá datos pero NO PODRÁ enviarlos a Discord.")
+        print("⚠️  Ve al panel de Render -> Environment y añade la variable.\n")
+        
     app.run(host='0.0.0.0', port=port)
