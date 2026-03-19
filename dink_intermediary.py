@@ -15,8 +15,11 @@ app = Flask(__name__)
 sys.stdout.reconfigure(line_buffering=True)
 
 # --- CONFIGURACIÓN ---
+# Webhook para notificaciones generales (loot, niveles, quests, etc.)
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
+# Webhook para logs internos del staff (alertas de IP, etc.)
 STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
+# Webhook EXCLUSIVO para notificaciones de LOGIN y LOGOUT
 LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 
 # Países permitidos
@@ -81,14 +84,19 @@ def proxy_destino():
                 except Exception as e:
                     print(f"  ❌ Error enviando log: {e}")
 
-            # Reenviar mensaje original
+            # --- LÓGICA DE ENRUTAMIENTO DE WEBHOOKS ---
+            # Por defecto, todas las notificaciones van al webhook principal.
             target = REAL_DISCORD_WEBHOOK_URL
+
+            # Si el tipo de notificación es LOGIN o LOGOUT, y tienes configurado un webhook específico para ello,
+            # cambiamos el destino a ese webhook.
             if notification_type in ['LOGIN', 'LOGOUT'] and LOGIN_LOGOUT_WEBHOOK_URL:
                 target = LOGIN_LOGOUT_WEBHOOK_URL
                 print(f"  📨 Usando webhook específico para {notification_type}")
 
             if target:
                 try:
+                    # Reenviamos el payload JSON original que nos envió Dink al webhook de Discord correspondiente.
                     response = requests.post(target, json=payload, timeout=5)
                     if response.status_code in [200, 204]:
                         print("  ✅ Mensaje reenviado a Discord")
