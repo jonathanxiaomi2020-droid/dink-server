@@ -26,7 +26,7 @@ LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 ALLOWED_COUNTRIES = [c.strip().upper() for c in os.getenv("ALLOWED_COUNTRIES", "US,GB,VE").split(',')]
 
 # --- ENDPOINT PARA RECIBIR DE HOOKDECK ---
-@app.route('/api/proxy-destino', methods=['GET', 'POST'])
+@app.route('/api/proxy-destino', methods=['GET', 'POST'], strict_slashes=False)
 def proxy_destino():
     """Recibe los webhooks desde Hookdeck"""
     # Si entras desde el navegador (GET), mostramos un mensaje de estado
