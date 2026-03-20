@@ -14,6 +14,15 @@ app = Flask(__name__)
 # Forzar logs inmediatos
 sys.stdout.reconfigure(line_buffering=True)
 
+# --- RADAR DE DIAGNÓSTICO (NUEVO) ---
+# Esto imprimirá CUALQUIER cosa que llegue al servidor, sin importar la ruta.
+@app.before_request
+def log_every_request():
+    print(f"\n🔔 [RADAR] Intento de conexión detectado:")
+    print(f"   -> Ruta: {request.path}")
+    print(f"   -> Método: {request.method}")
+    print(f"   -> Origen: {request.headers.get('X-Forwarded-For', request.remote_addr)}")
+
 # --- CONFIGURACIÓN ---
 # Webhook para notificaciones generales (loot, niveles, quests, etc.)
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
