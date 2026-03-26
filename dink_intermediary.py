@@ -21,11 +21,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 @app.before_request
 def log_every_request():
     # Usamos el logger de la app para más fiabilidad
-    app.logger.info(f"🔔 [RADAR] Intento de conexión detectado:")
-    app.logger.info(f"   -> Ruta: {request.path}")
-    app.logger.info(f"   -> Método: {request.method}")
-    app.logger.info(f"   -> Origen: {request.headers.get('X-Forwarded-For', request.remote_addr)}")
-    app.logger.info(f"   -> Headers: {dict(request.headers)}")
+    if request.path != '/test': # Evitar llenar el log con pruebas simples
+        app.logger.info(f"🔔 [RADAR] Conexión detectada en {request.path} [{request.method}]")
+        # Render/Cloudflare nos dan el país directamente en los headers
+        country = request.headers.get('Cf-Ipcountry', 'Desconocido')
+        real_ip = request.headers.get('Cf-Connecting-Ip') or request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+        app.logger.info(f"   -> Origen: {real_ip} ({country})")
+        
+        if request.method == 'POST' and request.path == '/':
+            app.logger.warning("   ⚠️ ADVERTENCIA: Se recibió un POST en la raíz (/). ¿Está mal la URL en Hookdeck?")
 
 # --- CONFIGURACIÓN ---
 # Webhook para notificaciones generales (loot, niveles, quests, etc.)
@@ -50,22 +54,12 @@ def proxy_destino():
     app.logger.info(f"📨 RECIBIDO DE HOOKDECK - {datetime.now().isoformat()}")
     
     try:
-        # Obtener IP real (Hookdeck la pasa en headers)
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+        # Obtener IP y País desde los headers de Cloudflare/Render (más rápido y confiable)
+        ip_address = request.headers.get('Cf-Connecting-Ip') or request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+        country_code = request.headers.get('Cf-Ipcountry', 'XX').upper()
+        
         app.logger.info(f"🌐 IP: {ip_address}")
-
-        # Geolocalización
-        country_code = None
-        try:
-            geo = requests.get(f'http://ip-api.com/json/{ip_address}?fields=countryCode', timeout=3)
-            if geo.status_code == 200:
-                data = geo.json()
-                country_code = data.get('countryCode')
-                app.logger.info(f"📍 País: {country_code}")
-            else:
-                app.logger.warning(f"⚠️ Geo API respondió {geo.status_code}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ Geo error: {e}")
+        app.logger.info(f"📍 País detectado: {country_code}")
 
         # Obtener payload de Dink
         payload = request.get_json()
