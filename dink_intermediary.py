@@ -1,160 +1,182 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
 import os
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-import json
-import sys
-import time
-from datetime import datetime
 import requests
-import logging
+import json
+from datetime import datetime
+from dotenv import load_dotenv
 
 load_dotenv()
-app = Flask(__name__)
 
-# --- CONFIGURACIÓN DE LOGS ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Configuration
+DINK_LOG_CHANNEL_ID = 1433918805255655576
+STAFF_ROLE_IDS = [938874749373804594, 938873962128089129, 1427823025163866233]
+ALLOWED_COUNTRIES = ["US", "GB", "VE", "ES"]
 
-# --- RADAR DE DIAGNÓSTICO ---
-@app.before_request
-def log_every_request():
-    app.logger.info(f"🔔 [RADAR] {request.method} {request.path}")
-    app.logger.info(f"   -> IP: {request.remote_addr}")
+class IPDetectorCog(commands.Cog):
+    """Detects IP/Country from Dink messages"""
     
-    country = request.headers.get('Cf-Ipcountry', 'XX')
-    ip = request.headers.get('Cf-Connecting-Ip', request.remote_addr)
-    app.logger.info(f"   -> País (Cloudflare): {country}")
-    app.logger.info(f"   -> IP (Cloudflare): {ip}")
-
-# --- CONFIGURACIÓN DE WEBHOOKS ---
-REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
-STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
-LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
-
-ALLOWED_COUNTRIES = [c.strip().upper() for c in os.getenv("ALLOWED_COUNTRIES", "US,GB,VE").split(',')]
-
-app.logger.info(f"✅ Webhooks configurados:")
-app.logger.info(f"   - Main: {'✅' if REAL_DISCORD_WEBHOOK_URL else '❌'}")
-app.logger.info(f"   - Staff: {'✅' if STAFF_LOG_WEBHOOK_URL else '❌'}")
-app.logger.info(f"   - Login: {'✅' if LOGIN_LOGOUT_WEBHOOK_URL else '❌'}")
-app.logger.info(f"✅ Países permitidos: {ALLOWED_COUNTRIES}")
-
-# --- ENDPOINT PRINCIPAL ---
-@app.route('/api/proxy-destino', methods=['GET', 'POST'], strict_slashes=False)
-def proxy_destino():
-    """Recibe los webhooks desde Hookdeck y los procesa"""
+    def __init__(self, bot):
+        self.bot = bot
+        self.last_country = "UNKNOWN"
+        self.last_ip = "UNKNOWN"
     
-    app.logger.info("\n" + "="*70)
-    app.logger.info("📨 SOLICITUD RECIBIDA EN /api/proxy-destino")
-    app.logger.info("="*70)
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Listen for Dink messages in the log channel"""
+        
+        if message.channel.id != DINK_LOG_CHANNEL_ID or not message.webhook_id:
+            await self.bot.process_commands(message)
+            return
+        
+        if not message.embeds:
+            await self.bot.process_commands(message)
+            return
+        
+        embed = message.embeds[0]
+        
+        if not embed.author or not embed.author.name:
+            await self.bot.process_commands(message)
+            return
+        
+        # Extract RSN
+        rsn = embed.author.name.split(" on World")[0].lower().strip()
+        
+        # Extract country from the embed content/description
+        country = self._extract_country_from_embed(embed)
+        
+        # Check if allowed
+        is_allowed = country.upper() in ALLOWED_COUNTRIES
+        
+        # Notify
+        await self._notify_login(rsn, country, is_allowed, message.created_at)
+        
+        await self.bot.process_commands(message)
     
-    if request.method == 'GET':
-        app.logger.info("✅ GET recibido (health check de Hookdeck)")
-        return jsonify({"status": "online", "endpoint": "/api/proxy-destino"}), 200
-
-    try:
-        ip_address = request.headers.get('Cf-Connecting-Ip') or \
-                    request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-        country_code = request.headers.get('Cf-Ipcountry', 'XX').upper()
+    def _extract_country_from_embed(self, embed):
+        """Extract country from embed"""
         
-        app.logger.info(f"🌐 IP: {ip_address}")
-        app.logger.info(f"📍 País: {country_code}")
-
-        payload = request.get_json()
+        # Check description
+        if embed.description:
+            # Look for country code patterns
+            if "Cf-Ipcountry" in embed.description:
+                lines = embed.description.split("\n")
+                for line in lines:
+                    if "Cf-Ipcountry" in line:
+                        # Extract the country code
+                        parts = line.split(":")
+                        if len(parts) > 1:
+                            country = parts[-1].strip().upper()
+                            if len(country) == 2 and country.isalpha():
+                                return country
         
-        if not payload:
-            app.logger.error("❌ No hay payload JSON")
-            return jsonify({"error": "No payload"}), 400
-
-        app.logger.info(f"📦 Payload recibido: {json.dumps(payload, indent=2)}")
-
-        player_name = payload.get('playerName') or payload.get('player_name', 'Desconocido')
-        notification_type = payload.get('type') or payload.get('extra', {}).get('type', 'General')
+        # Check fields
+        for field in embed.fields:
+            field_name = field.name.lower()
+            if "país" in field_name or "country" in field_name or "ipcountry" in field_name:
+                country = field.value.strip().upper()
+                if len(country) == 2 and country.isalpha():
+                    return country
         
-        app.logger.info(f"👤 Jugador: {player_name}")
-        app.logger.info(f"📌 Tipo: {notification_type}")
-
-        is_allowed = country_code in ALLOWED_COUNTRIES if country_code else True
+        return "UNKNOWN"
+    
+    async def _notify_login(self, rsn: str, country: str, is_allowed: bool, timestamp: datetime):
+        """Send notification"""
         
+        ip_detector_channel_id = os.getenv("IP_DETECTOR_CHANNEL_ID")
+        if not ip_detector_channel_id:
+            return
+        
+        try:
+            channel = self.bot.get_channel(int(ip_detector_channel_id))
+        except (ValueError, TypeError):
+            return
+        
+        if not channel:
+            return
+        
+        # Color and status
         if is_allowed:
-            app.logger.info(f"✅ PAÍS PERMITIDO: {country_code}")
+            color = discord.Color.green()
+            status_icon = "✅"
+            status_text = "PERMITIDO"
         else:
-            app.logger.warning(f"❌ PAÍS NO PERMITIDO: {country_code}")
-
-        if notification_type in ['LOGIN', 'LOGOUT'] and LOGIN_LOGOUT_WEBHOOK_URL:
-            target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
-            app.logger.info(f"📌 Usando webhook de LOGIN/LOGOUT")
-        else:
-            target_webhook = REAL_DISCORD_WEBHOOK_URL
-            app.logger.info(f"📌 Usando webhook principal")
-
-        if not target_webhook:
-            app.logger.error("❌ ERROR: No hay webhook configurado")
-            return jsonify({"error": "No webhook configured"}), 500
-
-        payload_to_send = payload.copy()
-        payload_to_send['detected_country'] = country_code
-        payload_to_send['detected_ip'] = ip_address
-        payload_to_send['is_country_allowed'] = is_allowed
-
-        app.logger.info(f"📤 Enviando a Discord...")
-        response = requests.post(target_webhook, json=payload_to_send, timeout=10)
+            color = discord.Color.red()
+            status_icon = "⚠️"
+            status_text = "BLOQUEADO"
         
-        app.logger.info(f"📡 Discord respondió: {response.status_code}")
+        # Create embed
+        embed = discord.Embed(
+            title=f"{status_icon} Login Detectado - {rsn.upper()}",
+            color=color,
+            timestamp=timestamp
+        )
         
-        if response.status_code in [200, 204]:
-            app.logger.info("✅ ¡Mensaje enviado a Discord correctamente!")
-        elif response.status_code == 429:
-            app.logger.warning("⚠️ Discord Rate Limit (429) - Esperando...")
-            time.sleep(2)
-            response = requests.post(target_webhook, json=payload_to_send, timeout=10)
-            app.logger.info(f"🔄 Reintento: {response.status_code}")
+        embed.add_field(name="👤 Cuenta", value=f"`{rsn}`", inline=True)
+        embed.add_field(name="🌍 País", value=f"`{country}`", inline=True)
+        embed.add_field(name="✅ Estado", value=status_text, inline=True)
+        
+        if not is_allowed:
+            embed.add_field(
+                name="⚠️ ALERTA",
+                value=f"**{rsn} intentó conectarse desde {country}**\n"
+                      f"Países permitidos: {', '.join(ALLOWED_COUNTRIES)}",
+                inline=False
+            )
         else:
-            app.logger.warning(f"⚠️ Discord respondió {response.status_code}: {response.text}")
-
-        app.logger.info("="*70 + "\n")
-        return jsonify({"status": "ok", "country": country_code, "allowed": is_allowed}), 200
-
-    except Exception as e:
-        app.logger.error(f"❌ EXCEPCIÓN: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-# --- ENDPOINT DE PRUEBA ---
-@app.route('/test')
-def test():
-    return jsonify({
-        "status": "ok",
-        "message": "Servidor funcionando correctamente",
-        "endpoint": "/api/proxy-destino",
-        "paises_permitidos": ALLOWED_COUNTRIES,
-        "webhooks": {
-            "Main": "✅" if REAL_DISCORD_WEBHOOK_URL else "❌",
-            "Staff": "✅" if STAFF_LOG_WEBHOOK_URL else "❌",
-            "Login": "✅" if LOGIN_LOGOUT_WEBHOOK_URL else "❌"
-        }
-    })
-
-@app.route('/')
-def index():
-    return jsonify({
-        "status": "Servidor Hookdeck Activo",
-        "instrucciones": {
-            "1": "URL en Dink: https://hkdk.events/knvi5xshnnwno6",
-            "2": "Endpoint: /api/proxy-destino",
-            "3": "Test: /test"
-        }
-    })
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.logger.info(f"\n🚀 SERVIDOR INICIADO")
-    app.logger.info(f"   Puerto: {port}")
-    app.logger.info(f"   Endpoint: /api/proxy-destino")
-    app.logger.info(f"   Países: {ALLOWED_COUNTRIES}\n")
+            embed.add_field(
+                name="✅ VERIFICADO",
+                value=f"**{rsn}** se conectó desde **{country}** ✓",
+                inline=False
+            )
+        
+        embed.set_footer(text="IP Detector - S T O N E Services")
+        
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            print(f"Error: {e}")
     
-    app.run(host='0.0.0.0', port=port)
+    @app_commands.command(name="set_ip_channel", description="Configura el canal para alertas de IP")
+    @app_commands.default_permissions(administrator=True)
+    async def set_ip_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """Configure the IP alert channel"""
+        
+        env_file = ".env"
+        
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                env_content = f.read()
+        except FileNotFoundError:
+            env_content = ""
+        
+        lines = env_content.split("\n")
+        found = False
+        new_lines = []
+        
+        for line in lines:
+            if line.startswith("IP_DETECTOR_CHANNEL_ID="):
+                new_lines.append(f"IP_DETECTOR_CHANNEL_ID={channel.id}")
+                found = True
+            else:
+                new_lines.append(line)
+        
+        if not found:
+            new_lines.append(f"IP_DETECTOR_CHANNEL_ID={channel.id}")
+        
+        with open(env_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(new_lines))
+        
+        os.environ["IP_DETECTOR_CHANNEL_ID"] = str(channel.id)
+        
+        embed = discord.Embed(
+            title="✅ Canal Configurado",
+            description=f"Las alertas se enviarán a {channel.mention}",
+            color=discord.Color.green()
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+async def setup(bot):
+    await bot.add_cog(IPDetectorCog(bot))
