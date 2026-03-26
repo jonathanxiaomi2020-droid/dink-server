@@ -181,7 +181,7 @@ def index():
     return jsonify({
         "status": "Servidor Hookdeck Activo",
         "instrucciones": {
-            "1": "URL en Dink: https://hkdk.events/2q7ojdp930t4hg",
+            "1": "URL en Dink: https://hkdk.events/knvi5xshnnwno6",
             "2": "Verifica logs en Render cuando hagas login",
             "3": "Usa /test para verificar el servidor"
         }
