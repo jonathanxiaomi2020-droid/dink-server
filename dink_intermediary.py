@@ -7,21 +7,25 @@ import time
 from datetime import datetime
 from dhooks import Webhook, Embed
 import requests
+import logging
 
 load_dotenv()
 app = Flask(__name__)
 
-# Forzar logs inmediatos
-sys.stdout.reconfigure(line_buffering=True)
+# --- CONFIGURACIÓN DE LOGS (NUEVO Y MEJORADO) ---
+# Configura un logging más robusto que print()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- RADAR DE DIAGNÓSTICO (NUEVO) ---
 # Esto imprimirá CUALQUIER cosa que llegue al servidor, sin importar la ruta.
 @app.before_request
 def log_every_request():
-    print(f"\n🔔 [RADAR] Intento de conexión detectado:")
-    print(f"   -> Ruta: {request.path}")
-    print(f"   -> Método: {request.method}")
-    print(f"   -> Origen: {request.headers.get('X-Forwarded-For', request.remote_addr)}")
+    # Usamos el logger de la app para más fiabilidad
+    app.logger.info(f"🔔 [RADAR] Intento de conexión detectado:")
+    app.logger.info(f"   -> Ruta: {request.path}")
+    app.logger.info(f"   -> Método: {request.method}")
+    app.logger.info(f"   -> Origen: {request.headers.get('X-Forwarded-For', request.remote_addr)}")
+    app.logger.info(f"   -> Headers: {dict(request.headers)}")
 
 # --- CONFIGURACIÓN ---
 # Webhook para notificaciones generales (loot, niveles, quests, etc.)
@@ -42,13 +46,13 @@ def proxy_destino():
     if request.method == 'GET':
         return jsonify({"status": "online", "message": "Este endpoint está esperando datos POST de Hookdeck."}), 200
 
-    print("\n" + "="*60)
-    print(f"📨 RECIBIDO DE HOOKDECK - {datetime.now().isoformat()}")
+    app.logger.info("\n" + "="*60)
+    app.logger.info(f"📨 RECIBIDO DE HOOKDECK - {datetime.now().isoformat()}")
     
     try:
         # Obtener IP real (Hookdeck la pasa en headers)
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-        print(f"🌐 IP: {ip_address}")
+        app.logger.info(f"🌐 IP: {ip_address}")
 
         # Geolocalización
         country_code = None
@@ -56,11 +60,12 @@ def proxy_destino():
             geo = requests.get(f'http://ip-api.com/json/{ip_address}?fields=countryCode', timeout=3)
             if geo.status_code == 200:
                 data = geo.json()
-                if data.get('status') == 'success':
-                    country_code = data.get('countryCode')
-                    print(f"📍 País: {country_code}")
+                country_code = data.get('countryCode')
+                app.logger.info(f"📍 País: {country_code}")
+            else:
+                app.logger.warning(f"⚠️ Geo API respondió {geo.status_code}")
         except Exception as e:
-            print(f"⚠️ Geo error: {e}")
+            app.logger.warning(f"⚠️ Geo error: {e}")
 
         # Obtener payload de Dink
         payload = request.get_json()
@@ -71,8 +76,8 @@ def proxy_destino():
         player_name = payload.get('playerName') or payload.get('player_name', 'Desconocido')
         notification_type = payload.get('type') or payload.get('extra', {}).get('type', 'General')
         
-        print(f"👤 Jugador: {player_name}")
-        print(f"📌 Tipo: {notification_type}")
+        app.logger.info(f"👤 Jugador: {player_name}")
+        app.logger.info(f"📌 Tipo: {notification_type}")
 
         # --- DECISIÓN ---
         # Si no se pudo detectar el país, asumimos que es seguro para no romper la prueba (puedes cambiar esto luego)
@@ -80,11 +85,11 @@ def proxy_destino():
         if country_code and country_code in ALLOWED_COUNTRIES:
             is_allowed = True
         elif country_code is None:
-            print("⚠️ No se pudo detectar país. Permitido por defecto para pruebas.")
+            app.logger.warning("⚠️ No se pudo detectar país. Permitido por defecto para pruebas.")
             is_allowed = True
 
         if is_allowed:
-            print(f"✅ PAÍS PERMITIDO: {country_code}")
+            app.logger.info(f"✅ PAÍS PERMITIDO: {country_code}")
             
             # Enviar LOG al staff
             if STAFF_LOG_WEBHOOK_URL:
@@ -101,9 +106,9 @@ def proxy_destino():
                     embed.add_field(name='Tipo', value=f'`{notification_type}`', inline=True)
                     embed.add_field(name='Fuente', value='`Hookdeck`', inline=True)
                     hook.send(embed=embed)
-                    print("  ✅ Log de staff enviado")
+                    app.logger.info("  ✅ Log de staff enviado")
                 except Exception as e:
-                    print(f"  ❌ Error enviando log: {e}")
+                    app.logger.error(f"  ❌ Error enviando log: {e}")
 
             # --- LÓGICA DE ENRUTAMIENTO DE WEBHOOKS ---
             # Por defecto, todas las notificaciones van al webhook principal.
@@ -113,11 +118,11 @@ def proxy_destino():
             # cambiamos el destino a ese webhook.
             if notification_type in ['LOGIN', 'LOGOUT'] and LOGIN_LOGOUT_WEBHOOK_URL:
                 target = LOGIN_LOGOUT_WEBHOOK_URL
-                print(f"  📨 Usando webhook específico para {notification_type}")
+                app.logger.info(f"  📨 Usando webhook específico para {notification_type}")
 
             if not target:
-                print("❌ ERROR CRÍTICO: No hay URL de Webhook configurada en las variables de entorno.")
-                print("   -> Asegúrate de configurar REAL_DISCORD_WEBHOOK_URL en Render.")
+                app.logger.error("❌ ERROR CRÍTICO: No hay URL de Webhook configurada en las variables de entorno.")
+                app.logger.error("   -> Asegúrate de configurar REAL_DISCORD_WEBHOOK_URL en Render.")
                 return jsonify({"error": "Server misconfiguration"}), 500
 
             if target:
@@ -125,14 +130,14 @@ def proxy_destino():
                     # Reenviamos el payload JSON original que nos envió Dink al webhook de Discord correspondiente.
                     response = requests.post(target, json=payload, timeout=5)
                     if response.status_code in [200, 204]:
-                        print("  ✅ Mensaje reenviado a Discord")
+                        app.logger.info("  ✅ Mensaje reenviado a Discord")
                     else:
-                        print(f"  ⚠️ Discord respondió {response.status_code}")
+                        app.logger.warning(f"  ⚠️ Discord respondió {response.status_code}")
                 except Exception as e:
-                    print(f"  ❌ Error reenviando: {e}")
+                    app.logger.error(f"  ❌ Error reenviando: {e}")
 
         else:
-            print(f"❌ PAÍS NO PERMITIDO: {country_code or 'Desconocido'}")
+            app.logger.warning(f"❌ PAÍS NO PERMITIDO: {country_code or 'Desconocido'}")
             
             # Alerta al staff
             if STAFF_LOG_WEBHOOK_URL:
@@ -149,15 +154,15 @@ def proxy_destino():
                     embed.add_field(name='Tipo', value=f'`{notification_type}`', inline=True)
                     embed.add_field(name='Fuente', value='`Hookdeck`', inline=True)
                     hook.send(embed=embed)
-                    print("  ✅ Alerta enviada")
+                    app.logger.info("  ✅ Alerta enviada")
                 except Exception as e:
-                    print(f"  ❌ Error enviando alerta: {e}")
+                    app.logger.error(f"  ❌ Error enviando alerta: {e}")
 
-        print("="*60 + "\n")
+        app.logger.info("="*60 + "\n")
         return jsonify({"status": "ok"}), 200
 
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        app.logger.error(f"❌ ERROR: {e}")
         return jsonify({"error": str(e)}), 500
 
 # --- ENDPOINT DE PRUEBA ---
@@ -189,13 +194,13 @@ def index():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    print(f"\n🚀 Servidor Hookdeck iniciado en puerto {port}")
-    print(f"✅ Endpoint para Hookdeck: /api/proxy-destino")
-    print(f"🌍 Países permitidos: {ALLOWED_COUNTRIES}")
+    app.logger.info(f"🚀 Servidor Hookdeck iniciado en puerto {port}")
+    app.logger.info(f"✅ Endpoint para Hookdeck: /api/proxy-destino")
+    app.logger.info(f"🌍 Países permitidos: {ALLOWED_COUNTRIES}")
     
     if not REAL_DISCORD_WEBHOOK_URL:
-        print("\n⚠️  ADVERTENCIA: 'REAL_DISCORD_WEBHOOK_URL' no está configurado.")
-        print("⚠️  El servidor recibirá datos pero NO PODRÁ enviarlos a Discord.")
-        print("⚠️  Ve al panel de Render -> Environment y añade la variable.\n")
+        app.logger.warning("ADVERTENCIA: 'REAL_DISCORD_WEBHOOK_URL' no está configurado.")
+        app.logger.warning("El servidor recibirá datos pero NO PODRÁ enviarlos a Discord.")
+        app.logger.warning("Ve al panel de Render -> Environment y añade la variable.")
         
     app.run(host='0.0.0.0', port=port)
