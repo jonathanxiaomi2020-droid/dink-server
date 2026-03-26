@@ -67,21 +67,34 @@ def dink_webhook_handler():
                     }]
                 }
                 try:
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5)
-                    print("✅ Alerta de éxito enviada")
+                    print(f"📤 Enviando a STAFF_LOG_WEBHOOK...")
+                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5)
+                    print(f"   Status: {resp.status_code}")
+                    if resp.status_code not in [200, 204]:
+                        print(f"   ❌ Error: {resp.text}")
+                    else:
+                        print(f"   ✅ Enviado")
                 except Exception as e:
-                    print(f"⚠️ Error alerta: {e}")
+                    print(f"   ❌ Error: {e}")
 
             target_webhook = REAL_DISCORD_WEBHOOK_URL
+            webhook_name = "REAL_DISCORD"
+            
             if notification_type == 'LOGIN' and LOGIN_LOGOUT_WEBHOOK_URL:
                 target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
+                webhook_name = "LOGIN_LOGOUT"
             
             if target_webhook:
                 try:
-                    requests.post(target_webhook, json=dink_payload, timeout=10)
-                    print("✅ Reenviado a Discord")
+                    print(f"📤 Enviando a {webhook_name}...")
+                    resp = requests.post(target_webhook, json=dink_payload, timeout=10)
+                    print(f"   Status: {resp.status_code}")
+                    if resp.status_code not in [200, 204]:
+                        print(f"   ❌ Error: {resp.text}")
+                    else:
+                        print(f"   ✅ Enviado")
                 except Exception as e:
-                    print(f"⚠️ Error Discord: {e}")
+                    print(f"   ❌ Error: {e}")
             
             return jsonify({"status": "ok"}), 200
         
@@ -102,14 +115,18 @@ def dink_webhook_handler():
                     }]
                 }
                 try:
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=alert, timeout=10)
+                    print(f"📤 Enviando alerta de bloqueo...")
+                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=alert, timeout=10)
+                    print(f"   Status: {resp.status_code}")
                 except Exception as e:
-                    print(f"⚠️ Error: {e}")
+                    print(f"   ❌ Error: {e}")
             
             return jsonify({"status": "ok"}), 200
 
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "Error"}), 500
 
 if __name__ == '__main__':
