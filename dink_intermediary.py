@@ -118,7 +118,7 @@ def proxy_destino():
             # cambiamos el destino a ese webhook.
             if notification_type in ['LOGIN', 'LOGOUT'] and LOGIN_LOGOUT_WEBHOOK_URL:
                 target = LOGIN_LOGOUT_WEBHOOK_URL
-                app.logger.info(f"  📨 Usando webhook específico para {notification_type}")
+                app.logger.info(f"  📨 Tipo {notification_type} detectado. Usando webhook de Login/Logout.")
 
             if not target:
                 app.logger.error("❌ ERROR CRÍTICO: No hay URL de Webhook configurada en las variables de entorno.")
@@ -127,6 +127,7 @@ def proxy_destino():
 
             if target:
                 try:
+                    app.logger.info(f"  📤 Reenviando a Discord (Webhook termina en: ...{target[-10:]})")
                     # Reenviamos el payload JSON original que nos envió Dink al webhook de Discord correspondiente.
                     response = requests.post(target, json=payload, timeout=5)
                     if response.status_code in [200, 204]:
