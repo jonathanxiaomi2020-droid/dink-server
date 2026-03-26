@@ -3,6 +3,7 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import json
+import time
 
 load_dotenv()
 
@@ -52,6 +53,11 @@ def dink_webhook_handler():
         if country_code and country_code in ALLOWED_COUNTRIES:
             print(f"✅ PERMITIDO")
             
+            # Headers para parecer un navegador normal
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            
             if STAFF_LOG_WEBHOOK_URL:
                 success_alert = {
                     "content": f"✅ **Actividad Autorizada**",
@@ -68,15 +74,18 @@ def dink_webhook_handler():
                 }
                 try:
                     print(f"📤 Enviando a STAFF_LOG_WEBHOOK...")
-                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5)
+                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5, headers=headers)
                     print(f"   Status: {resp.status_code}")
                     if resp.status_code not in [200, 204]:
-                        print(f"   ❌ Error: {resp.text}")
+                        print(f"   ❌ Error")
                     else:
                         print(f"   ✅ Enviado")
                 except Exception as e:
                     print(f"   ❌ Error: {e}")
-
+            
+            # Esperar un poco antes de enviar al siguiente webhook
+            time.sleep(0.5)
+            
             target_webhook = REAL_DISCORD_WEBHOOK_URL
             webhook_name = "REAL_DISCORD"
             
@@ -87,10 +96,10 @@ def dink_webhook_handler():
             if target_webhook:
                 try:
                     print(f"📤 Enviando a {webhook_name}...")
-                    resp = requests.post(target_webhook, json=dink_payload, timeout=10)
+                    resp = requests.post(target_webhook, json=dink_payload, timeout=10, headers=headers)
                     print(f"   Status: {resp.status_code}")
                     if resp.status_code not in [200, 204]:
-                        print(f"   ❌ Error: {resp.text}")
+                        print(f"   ❌ Error")
                     else:
                         print(f"   ✅ Enviado")
                 except Exception as e:
@@ -102,6 +111,10 @@ def dink_webhook_handler():
             print(f"❌ BLOQUEADO")
             
             if STAFF_LOG_WEBHOOK_URL:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+                
                 alert = {
                     "content": f"🚨 **BLOQUEADO** 🚨",
                     "embeds": [{
@@ -116,8 +129,7 @@ def dink_webhook_handler():
                 }
                 try:
                     print(f"📤 Enviando alerta de bloqueo...")
-                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=alert, timeout=10)
-                    print(f"   Status: {resp.status_code}")
+                    requests.post(STAFF_LOG_WEBHOOK_URL, json=alert, timeout=10, headers=headers)
                 except Exception as e:
                     print(f"   ❌ Error: {e}")
             
