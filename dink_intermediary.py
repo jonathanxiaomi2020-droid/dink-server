@@ -5,7 +5,6 @@ import json
 import sys
 import time
 from datetime import datetime
-from dhooks import Webhook, Embed
 import requests
 import logging
 
@@ -88,19 +87,22 @@ def proxy_destino():
             # Enviar LOG al staff
             if STAFF_LOG_WEBHOOK_URL:
                 try:
-                    hook = Webhook(STAFF_LOG_WEBHOOK_URL)
-                    embed = Embed(
-                        title='✅ Actividad Autorizada',
-                        color=0x00ff00,
-                        timestamp=datetime.now().isoformat()
-                    )
-                    embed.add_field(name='Jugador', value=f'`{player_name}`', inline=True)
-                    embed.add_field(name='País', value=f'`{country_code}`', inline=True)
-                    embed.add_field(name='IP', value=f'`{ip_address}`', inline=True)
-                    embed.add_field(name='Tipo', value=f'`{notification_type}`', inline=True)
-                    embed.add_field(name='Fuente', value='`Hookdeck`', inline=True)
-                    hook.send(embed=embed)
-                    app.logger.info("  ✅ Log de staff enviado")
+                    staff_payload = {
+                        "embeds": [{
+                            "title": "✅ Actividad Autorizada",
+                            "color": 65280, # Verde
+                            "timestamp": datetime.now().isoformat(),
+                            "fields": [
+                                {"name": "Jugador", "value": f"`{player_name}`", "inline": True},
+                                {"name": "País", "value": f"`{country_code}`", "inline": True},
+                                {"name": "IP", "value": f"`{ip_address}`", "inline": True},
+                                {"name": "Tipo", "value": f"`{notification_type}`", "inline": True},
+                                {"name": "Fuente", "value": "`Hookdeck`", "inline": True}
+                            ]
+                        }]
+                    }
+                    requests.post(STAFF_LOG_WEBHOOK_URL, json=staff_payload, timeout=5)
+                    app.logger.info("  ✅ Intento de log de staff enviado")
                 except Exception as e:
                     app.logger.error(f"  ❌ Error enviando log: {e}")
 
@@ -126,6 +128,9 @@ def proxy_destino():
                     response = requests.post(target, json=payload, timeout=5)
                     if response.status_code in [200, 204]:
                         app.logger.info("  ✅ Mensaje reenviado a Discord")
+                    elif response.status_code == 429:
+                        retry_after = response.json().get('retry_after', 0)
+                        app.logger.warning(f"  ⚠️ Discord Rate Limit (429). Reintentar en {retry_after}ms")
                     else:
                         app.logger.warning(f"  ⚠️ Discord respondió {response.status_code}")
                 except Exception as e:
@@ -137,19 +142,22 @@ def proxy_destino():
             # Alerta al staff
             if STAFF_LOG_WEBHOOK_URL:
                 try:
-                    hook = Webhook(STAFF_LOG_WEBHOOK_URL)
-                    embed = Embed(
-                        title='🚨 IP No Autorizada - Intento Bloqueado',
-                        color=0xff0000,
-                        timestamp=datetime.now().isoformat()
-                    )
-                    embed.add_field(name='Jugador', value=f'`{player_name}`', inline=True)
-                    embed.add_field(name='País', value=f'`{country_code or "Desconocido"}`', inline=True)
-                    embed.add_field(name='IP', value=f'`{ip_address}`', inline=True)
-                    embed.add_field(name='Tipo', value=f'`{notification_type}`', inline=True)
-                    embed.add_field(name='Fuente', value='`Hookdeck`', inline=True)
-                    hook.send(embed=embed)
-                    app.logger.info("  ✅ Alerta enviada")
+                    staff_payload = {
+                        "embeds": [{
+                            "title": "🚨 IP No Autorizada - Intento Bloqueado",
+                            "color": 16711680, # Rojo
+                            "timestamp": datetime.now().isoformat(),
+                            "fields": [
+                                {"name": "Jugador", "value": f"`{player_name}`", "inline": True},
+                                {"name": "País", "value": f"`{country_code or 'Desconocido'}`", "inline": True},
+                                {"name": "IP", "value": f"`{ip_address}`", "inline": True},
+                                {"name": "Tipo", "value": f"`{notification_type}`", "inline": True},
+                                {"name": "Fuente", "value": "`Hookdeck`", "inline": True}
+                            ]
+                        }]
+                    }
+                    requests.post(STAFF_LOG_WEBHOOK_URL, json=staff_payload, timeout=5)
+                    app.logger.info("  ✅ Intento de alerta enviado")
                 except Exception as e:
                     app.logger.error(f"  ❌ Error enviando alerta: {e}")
 
