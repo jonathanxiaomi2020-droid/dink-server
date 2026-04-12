@@ -96,9 +96,11 @@ def dink_webhook_handler():
         return jsonify({"status": "URL correcta"}), 200
 
     try:
-        dink_payload = request.get_json(force=True)
+        # silent=True evita que Flask lance una excepción 400 si el cuerpo está vacío o mal formado
+        dink_payload = request.get_json(force=True, silent=True)
+        
         if not dink_payload:
-            app.logger.warning("⚠️ Petición recibida sin cuerpo JSON")
+            app.logger.warning(f"⚠️ Petición recibida sin cuerpo JSON válido. Data cruda: {request.data.decode('utf-8')[:100]}")
             return jsonify({"error": "No payload"}), 400
 
         app.logger.info(f"--- [NUEVA PETICIÓN: {dink_payload.get('type', 'UNKNOWN')}] ---")
