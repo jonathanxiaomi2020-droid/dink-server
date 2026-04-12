@@ -3,7 +3,5 @@ aiohttp
 python-dotenv
 requests
 gunicorn
-dhooks==1.1.4
 Flask
 Flask-SQLAlchemy
-
