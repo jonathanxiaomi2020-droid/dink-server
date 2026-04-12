@@ -2,23 +2,86 @@ import os
 import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy
 import json
 import time
+from datetime import datetime
+import logging
 
 load_dotenv()
 
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dink_logs.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
+# Configurar logs para Render
+logging.basicConfig(level=logging.INFO)
+
+# --- Modelos de Base de Datos ---
+class DinkEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    player_name = db.Column(db.String(50))
+    event_type = db.Column(db.String(20))
+    ip_address = db.Column(db.String(45))
+    country = db.Column(db.String(5))
+    details = db.Column(db.Text)
+
+with app.app_context():
+    db.create_all()
+
+# --- Configuración ---
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
 STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
-LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 
 ALLOWED_COUNTRIES_STR = os.getenv("ALLOWED_COUNTRIES", "US,GB,VE,ES")
 ALLOWED_COUNTRIES = [country.strip().upper() for country in ALLOWED_COUNTRIES_STR.split(',')]
 
 @app.route('/')
 def index():
-    return jsonify({"status": "Dink webhook endpoint is active"})
+    return jsonify({
+        "status": "Online - S T O N E Intermediary",
+        "file": "dink_intermediary.py",
+        "dashboard": "/dashboard",
+        "webhooks": ["/api/proxy-destino", "/api/webhooks/dink"]
+    })
+
+# --- Web Dashboard ---
+@app.route('/dashboard', strict_slashes=False)
+def dashboard():
+    logs = DinkEvent.query.order_by(DinkEvent.timestamp.desc()).limit(100).all()
+    html = """
+    <html>
+    <head>
+        <title>S T O N E | Dink Monitor</title>
+        <meta http-equiv="refresh" content="30">
+        <style>
+            body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
+            th { background: #333; color: #00ff9f; }
+            tr:hover { background: #252525; }
+            .LOGIN { color: #00ff9f; }
+            .LEVEL { color: #ffae00; }
+            .BLOQUEADO { color: #ff4e4e; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <h1>💎 S T O N E | Panel de Notificaciones</h1>
+        <p>Mostrando los últimos 100 eventos (Auto-refresh 30s)</p>
+        <table>
+            <tr>
+                <th>Fecha (UTC)</th><th>Jugador</th><th>Evento</th><th>País</th><th>IP</th>
+            </tr>
+    """
+    for log in logs:
+        html += f"<tr><td>{log.timestamp.strftime('%H:%M:%S')}</td><td>{log.player_name}</td>"
+        html += f"<td class='{log.event_type}'>{log.event_type}</td>"
+        html += f"<td>{log.country}</td><td>{log.ip_address}</td></tr>"
+    
+    html += "</table></body></html>"
+    return html
 
 @app.route('/api/webhooks/dink', methods=['POST', 'GET'])
 @app.route('/api/proxy-destino', methods=['POST', 'GET'])
@@ -26,10 +89,10 @@ def dink_webhook_handler():
     if request.method == 'GET':
         return jsonify({"status": "URL correcta"}), 200
 
-    print("\n--- [NUEVA PETICIÓN] ---")
+    app.logger.info("--- [NUEVA PETICIÓN WEBHOOK] ---")
     try:
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-        print(f"✅ IP: {ip_address}")
+        app.logger.info(f"✅ IP: {ip_address}")
 
         country_code = None
         try:
@@ -38,105 +101,54 @@ def dink_webhook_handler():
                 data = response.json()
                 if data.get('status') == 'success':
                     country_code = data.get('countryCode')
-                    print(f"✅ País: {country_code}")
+                    app.logger.info(f"✅ País: {country_code}")
         except Exception as e:
-            print(f"⚠️ Geo error: {e}")
+            app.logger.warning(f"⚠️ Geo error: {e}")
         
         dink_payload = request.get_json()
         
         player_name = dink_payload.get('playerName', 'Desconocido')
         notification_type = dink_payload.get('type')
         
-        print(f"👤 Jugador: {player_name}")
-        print(f"📌 Tipo: {notification_type}")
+        app.logger.info(f"👤 Jugador: {player_name}")
+        app.logger.info(f"📌 Tipo: {notification_type}")
 
+        # --- GUARDAR SIEMPRE EN BASE DE DATOS ---
+        new_log = DinkEvent(
+            player_name=player_name,
+            event_type=notification_type,
+            ip_address=ip_address,
+            country=country_code or "??",
+            details=json.dumps(dink_payload)
+        )
+
+        # --- LÓGICA DE FILTRADO Y ENVÍO ---
         if country_code and country_code in ALLOWED_COUNTRIES:
-            print(f"✅ PERMITIDO")
-            
-            # Headers para parecer un navegador normal
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            
-            if STAFF_LOG_WEBHOOK_URL:
-                success_alert = {
-                    "content": f"✅ **Actividad Autorizada**",
-                    "embeds": [{
-                        "color": 5763719,
-                        "title": "Conexión Válida Detectada",
-                        "fields": [
-                            {"name": "Jugador (RSN)", "value": f"`{player_name}`", "inline": True},
-                            {"name": "País", "value": f"`{country_code}`", "inline": True},
-                            {"name": "IP", "value": f"`{ip_address}`", "inline": True},
-                            {"name": "Tipo", "value": f"`{notification_type}`", "inline": True}
-                        ]
-                    }]
-                }
+            app.logger.info(f"✅ PAÍS PERMITIDO: {country_code}")
+
+            # Si es LOGIN o LOGOUT, NO enviamos a Discord (ya está en el Dashboard)
+            # Solo enviamos actualizaciones importantes como niveles, quests o loot
+            if notification_type not in ['LOGIN', 'LOGOUT']:
                 try:
-                    print(f"📤 Enviando a STAFF_LOG_WEBHOOK...")
-                    resp = requests.post(STAFF_LOG_WEBHOOK_URL, json=success_alert, timeout=5, headers=headers)
-                    print(f"   Status: {resp.status_code}")
-                    if resp.status_code not in [200, 204]:
-                        print(f"   ❌ Error")
-                    else:
-                        print(f"   ✅ Enviado")
+                    app.logger.info(f"📤 Reenviando {notification_type} a Discord...")
+                    resp = requests.post(REAL_DISCORD_WEBHOOK_URL, json=dink_payload, timeout=10)
+                    app.logger.info(f"   Discord Status: {resp.status_code}")
                 except Exception as e:
-                    print(f"   ❌ Error: {e}")
-            
-            # Esperar un poco antes de enviar al siguiente webhook
-            time.sleep(0.5)
-            
-            target_webhook = REAL_DISCORD_WEBHOOK_URL
-            webhook_name = "REAL_DISCORD"
-            
-            if notification_type == 'LOGIN' and LOGIN_LOGOUT_WEBHOOK_URL:
-                target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
-                webhook_name = "LOGIN_LOGOUT"
-            
-            if target_webhook:
-                try:
-                    print(f"📤 Enviando a {webhook_name}...")
-                    resp = requests.post(target_webhook, json=dink_payload, timeout=10, headers=headers)
-                    print(f"   Status: {resp.status_code}")
-                    if resp.status_code not in [200, 204]:
-                        print(f"   ❌ Error")
-                    else:
-                        print(f"   ✅ Enviado")
-                except Exception as e:
-                    print(f"   ❌ Error: {e}")
-            
+                    app.logger.error(f"   ❌ Error enviando a Discord: {e}")
+
+            db.session.add(new_log)
+            db.session.commit()
             return jsonify({"status": "ok"}), 200
         
         else:
-            print(f"❌ BLOQUEADO")
-            
-            if STAFF_LOG_WEBHOOK_URL:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-                
-                alert = {
-                    "content": f"🚨 **BLOQUEADO** 🚨",
-                    "embeds": [{
-                        "color": 15158332,
-                        "title": "Intento bloqueado",
-                        "fields": [
-                            {"name": "Jugador", "value": f"`{player_name}`", "inline": True},
-                            {"name": "País", "value": f"`{country_code or 'Unknown'}`", "inline": True},
-                            {"name": "IP", "value": f"`{ip_address}`", "inline": True}
-                        ]
-                    }]
-                }
-                try:
-                    print(f"📤 Enviando alerta de bloqueo...")
-                    requests.post(STAFF_LOG_WEBHOOK_URL, json=alert, timeout=10, headers=headers)
-                except Exception as e:
-                    print(f"   ❌ Error: {e}")
-            
+            app.logger.warning(f"❌ PAÍS BLOQUEADO: {country_code}")
+            new_log.event_type = 'BLOQUEADO'
+            db.session.add(new_log)
+            db.session.commit()
             return jsonify({"status": "ok"}), 200
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        app.logger.error(f"❌ Error General: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": "Error"}), 500
