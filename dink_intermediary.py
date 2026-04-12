@@ -7,6 +7,7 @@ import json
 import time
 from datetime import datetime
 import logging
+import sys
 
 load_dotenv()
 
@@ -16,7 +17,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # Configurar logs para Render
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
 
 # --- Modelos de Base de Datos ---
 class DinkEvent(db.Model):
@@ -127,11 +132,14 @@ def dink_webhook_handler():
         )
 
         # --- LÓGICA DE FILTRADO Y ENVÍO ---
-        # Permitimos el paso si el país es conocido y está en la lista, O si es desconocido (??) para no bloquear accidentalmente
-        is_allowed = (country_code in ALLOWED_COUNTRIES) or (country_code is None)
+        # Normalizar el código de país a mayúsculas para comparar
+        current_country = country_code.upper() if country_code else None
+        
+        # Permitimos si el país está en la lista O si no se pudo detectar (None)
+        is_allowed = (current_country in ALLOWED_COUNTRIES) or (current_country is None)
 
         if is_allowed:
-            app.logger.info(f"✅ ACTIVIDAD PERMITIDA (País: {country_code or 'Desconocido'})")
+            app.logger.info(f"✅ ACTIVIDAD PERMITIDA (País: {current_country or 'Desconocido'})")
 
             # Determinar a qué webhook enviar
             target_webhook = None
@@ -140,7 +148,7 @@ def dink_webhook_handler():
                 # Solo enviamos logins a Discord si configuraste LOGIN_LOGOUT_WEBHOOK_URL en Render
                 target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
                 if not target_webhook:
-                    app.logger.info(f"ℹ️ {notification_type} detectado pero no hay webhook de Login configurado. Se queda solo en Dashboard.")
+                    app.logger.warning(f"⚠️ {notification_type} detectado pero la variable LOGIN_LOGOUT_WEBHOOK_URL está vacía en Render.")
             else:
                 # Updates normales (Level, Quest, Loot) van al webhook principal
                 target_webhook = REAL_DISCORD_WEBHOOK_URL
@@ -155,9 +163,12 @@ def dink_webhook_handler():
                     app.logger.info(f"   Discord respondió: {resp.status_code}")
                     
                     if resp.status_code == 429:
-                        app.logger.warning("   ⚠️ Discord Rate Limit! Demasiados mensajes.")
+                        app.logger.warning("   ⚠️ Discord bloqueó el mensaje por spam (Rate Limit 429).")
                 except Exception as e:
                     app.logger.error(f"   ❌ Error de red enviando a Discord: {e}")
+            else:
+                if notification_type not in ['LOGIN', 'LOGOUT']:
+                    app.logger.error(f"❌ ERROR: No se puede reenviar {notification_type} porque REAL_DISCORD_WEBHOOK_URL no está configurada.")
 
             db.session.add(new_log)
             db.session.commit()
