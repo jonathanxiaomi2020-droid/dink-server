@@ -34,6 +34,7 @@ with app.app_context():
 # --- Configuración ---
 REAL_DISCORD_WEBHOOK_URL = os.getenv("REAL_DISCORD_WEBHOOK_URL")
 STAFF_LOG_WEBHOOK_URL = os.getenv("STAFF_LOG_WEBHOOK_URL")
+LOGIN_LOGOUT_WEBHOOK_URL = os.getenv("LOGIN_LOGOUT_WEBHOOK_URL")
 
 ALLOWED_COUNTRIES_STR = os.getenv("ALLOWED_COUNTRIES", "US,GB,VE,ES")
 ALLOWED_COUNTRIES = [country.strip().upper() for country in ALLOWED_COUNTRIES_STR.split(',')]
@@ -126,25 +127,44 @@ def dink_webhook_handler():
         )
 
         # --- LÓGICA DE FILTRADO Y ENVÍO ---
-        if country_code and country_code in ALLOWED_COUNTRIES:
-            app.logger.info(f"✅ PAÍS PERMITIDO: {country_code}")
+        # Permitimos el paso si el país es conocido y está en la lista, O si es desconocido (??) para no bloquear accidentalmente
+        is_allowed = (country_code in ALLOWED_COUNTRIES) or (country_code is None)
 
-            # Si es LOGIN o LOGOUT, NO enviamos a Discord (ya está en el Dashboard)
-            # Solo enviamos actualizaciones importantes como niveles, quests o loot
-            if notification_type not in ['LOGIN', 'LOGOUT']:
+        if is_allowed:
+            app.logger.info(f"✅ ACTIVIDAD PERMITIDA (País: {country_code or 'Desconocido'})")
+
+            # Determinar a qué webhook enviar
+            target_webhook = None
+            
+            if notification_type in ['LOGIN', 'LOGOUT']:
+                # Solo enviamos logins a Discord si configuraste LOGIN_LOGOUT_WEBHOOK_URL en Render
+                target_webhook = LOGIN_LOGOUT_WEBHOOK_URL
+                if not target_webhook:
+                    app.logger.info(f"ℹ️ {notification_type} detectado pero no hay webhook de Login configurado. Se queda solo en Dashboard.")
+            else:
+                # Updates normales (Level, Quest, Loot) van al webhook principal
+                target_webhook = REAL_DISCORD_WEBHOOK_URL
+
+            if target_webhook:
                 try:
                     app.logger.info(f"📤 Reenviando {notification_type} a Discord...")
-                    resp = requests.post(REAL_DISCORD_WEBHOOK_URL, json=dink_payload, timeout=10)
-                    app.logger.info(f"   Discord Status: {resp.status_code}")
+                    # Logueamos los últimos 10 caracteres del webhook para verificar que existe
+                    app.logger.info(f"   Webhook destino termina en: ...{target_webhook[-10:]}")
+                    
+                    resp = requests.post(target_webhook, json=dink_payload, timeout=10)
+                    app.logger.info(f"   Discord respondió: {resp.status_code}")
+                    
+                    if resp.status_code == 429:
+                        app.logger.warning("   ⚠️ Discord Rate Limit! Demasiados mensajes.")
                 except Exception as e:
-                    app.logger.error(f"   ❌ Error enviando a Discord: {e}")
+                    app.logger.error(f"   ❌ Error de red enviando a Discord: {e}")
 
             db.session.add(new_log)
             db.session.commit()
             return jsonify({"status": "ok"}), 200
         
         else:
-            app.logger.warning(f"❌ PAÍS BLOQUEADO: {country_code}")
+            app.logger.warning(f"❌ PAÍS BLOQUEADO: {country_code}. No se envía a Discord.")
             new_log.event_type = 'BLOQUEADO'
             db.session.add(new_log)
             db.session.commit()
