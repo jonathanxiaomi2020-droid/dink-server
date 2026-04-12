@@ -91,7 +91,7 @@ def dink_webhook_handler():
         return jsonify({"status": "URL correcta"}), 200
 
     try:
-        dink_payload = request.get_json()
+        dink_payload = request.get_json(force=True)
         if not dink_payload:
             app.logger.warning("⚠️ Petición recibida sin cuerpo JSON")
             return jsonify({"error": "No payload"}), 400
