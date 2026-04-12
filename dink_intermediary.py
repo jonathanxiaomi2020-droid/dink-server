@@ -89,10 +89,15 @@ def dink_webhook_handler():
     if request.method == 'GET':
         return jsonify({"status": "URL correcta"}), 200
 
-    app.logger.info("--- [NUEVA PETICIÓN WEBHOOK] ---")
     try:
+        dink_payload = request.get_json()
+        if not dink_payload:
+            app.logger.warning("⚠️ Petición recibida sin cuerpo JSON")
+            return jsonify({"error": "No payload"}), 400
+
+        app.logger.info(f"--- [NUEVA PETICIÓN: {dink_payload.get('type', 'UNKNOWN')}] ---")
+
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-        app.logger.info(f"✅ IP: {ip_address}")
 
         country_code = None
         try:
@@ -105,13 +110,11 @@ def dink_webhook_handler():
         except Exception as e:
             app.logger.warning(f"⚠️ Geo error: {e}")
         
-        dink_payload = request.get_json()
-        
         player_name = dink_payload.get('playerName', 'Desconocido')
-        notification_type = dink_payload.get('type')
+        # El tipo puede estar en la raíz o dentro de 'extra'
+        notification_type = dink_payload.get('type') or dink_payload.get('extra', {}).get('type', 'Unknown')
         
-        app.logger.info(f"👤 Jugador: {player_name}")
-        app.logger.info(f"📌 Tipo: {notification_type}")
+        app.logger.info(f"👤 Jugador: {player_name} | Tipo: {notification_type} | IP: {ip_address}")
 
         # --- GUARDAR SIEMPRE EN BASE DE DATOS ---
         new_log = DinkEvent(
