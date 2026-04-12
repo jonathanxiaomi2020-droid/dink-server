@@ -1,7 +1,9 @@
 discord.py
 aiohttp
 python-dotenv
-Flask
 requests
 gunicorn
 dhooks==1.1.4
+Flask
+Flask-SQLAlchemy
+
