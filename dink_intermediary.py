@@ -100,7 +100,9 @@ def dink_webhook_handler():
         dink_payload = request.get_json(force=True, silent=True)
         
         if not dink_payload:
-            app.logger.warning(f"⚠️ Petición recibida sin cuerpo JSON válido. Data cruda: {request.data.decode('utf-8')[:100]}")
+            # Usamos errors='replace' para que caracteres extraños no rompan el log
+            raw_data_sample = request.data.decode('utf-8', errors='replace')[:100]
+            app.logger.warning(f"⚠️ Petición recibida sin cuerpo JSON válido. Data cruda: {raw_data_sample}")
             return jsonify({"error": "No payload"}), 400
 
         app.logger.info(f"--- [NUEVA PETICIÓN: {dink_payload.get('type', 'UNKNOWN')}] ---")
